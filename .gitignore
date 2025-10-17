@@ -375,5 +375,5 @@ docker-compose.debug.yml
 docker-compose.release.yml
 
 # Ignore appsettings files that may contain sensitive data
-src/SaaSifyCore.Api/appsettings.json
-src/SaaSifyCore.Api/appsettings.Development.json
+appsettings.Development.json
+appsettings.json
