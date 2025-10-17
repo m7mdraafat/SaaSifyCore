@@ -374,6 +374,6 @@ docker-compose.local.yml
 docker-compose.debug.yml
 docker-compose.release.yml
 
-# Ignore appsettings files that may contain sensitive data
-appsettings.Development.json
-appsettings.json
+# Ignore all appsettings except the template
+**/appsettings*.json
+!**/appsettings.example.json

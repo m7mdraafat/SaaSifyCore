@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SaaSifyCore.Domain.Interfaces;
 using SaaSifyCore.Infrastructure.Data;
+using SaaSifyCore.Infrastructure.MultiTenancy;
 
 /// <summary>
 /// Infrastructure layer dependency injection configuration.
@@ -53,8 +54,8 @@ public static class DependencyInjection
         services.AddScoped<IApplicationDbContext>(provider =>
             provider.GetRequiredService<ApplicationDbContext>());
 
+        services.AddScoped<ITenantContext, TenantContext>();
         // TODO: Add other infrastructure services here as we build them:
-        // - ITenantContext implementation (Phase 2)
         // - Email services (Phase 3)
         // - Blob storage (Phase 3)
         // - Caching (Redis) (Phase 3)

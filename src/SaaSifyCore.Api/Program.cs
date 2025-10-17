@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SaaSifyCore.Api.Configuration;
+using SaaSifyCore.Api.Middleware;
 using SaaSifyCore.Infrastructure;
 using SaaSifyCore.Infrastructure.Data;
 
@@ -41,8 +42,11 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+app.UseMiddleware<TenantResolutionMiddleware>();
+
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
+
 app.MapControllers();
 
 app.Run();
