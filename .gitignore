@@ -361,3 +361,19 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+// Ignore docker-compose files
+docker-compose.override.yml
+docker-compose.yml
+docker-compose.test.yml
+docker-compose.ci.yml
+docker-compose.dev.yml
+docker-compose.prod.yml
+docker-compose.staging.yml
+docker-compose.local.yml
+docker-compose.debug.yml
+docker-compose.release.yml
+
+# Ignore appsettings files that may contain sensitive data
+src/SaaSifyCore.Api/appsettings.json
+src/SaaSifyCore.Api/appsettings.Development.json

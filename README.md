@@ -10,9 +10,9 @@
 Its core mission is to make it **extremely easy for developers or companies to launch new SaaS platforms quickly** — without rebuilding essential infrastructure such as:
 
 - 🔑 Authentication & Authorization  
-- 🏢 Tenant Management  
-- 💳 Subscription & Payment Handling  
-- ✉️ Email & Identity Verification  
+- 🏢 Tenant Management
+- 💳 Subscription & Payment Handling
+- ✉️ Email & Identity Verification
 - 🧾 Audit Logging  
 - 🧱 Resource Isolation  
 

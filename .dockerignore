@@ -1,0 +1,82 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+LICENSE
+docs/
+
+# Docker files
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Build outputs
+**/bin/
+**/obj/
+**/out/
+**/publish/
+
+# Visual Studio / Rider
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# NuGet packages (restore during build)
+**/packages/
+*.nupkg
+*.snupkg
+
+# Test results
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# Build logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+**/temp/
+**/tmp/
+**/.tmp/
+
+# Migrations (if you don't want to copy them)
+# Uncomment if migrations should be generated fresh in container
+# **/Migrations/
+
+# User-specific files
+*.suo
+*.user
+*.sln.docstates
+
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+
+# Azure / AWS
+.azure/
+.aws/

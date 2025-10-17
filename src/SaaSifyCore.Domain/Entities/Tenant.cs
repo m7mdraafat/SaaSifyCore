@@ -9,7 +9,7 @@ namespace SaaSifyCore.Domain.Entities;
 public class Tenant : BaseEntity
 {
     public TenantName Name { get; private set; }
-    public SubDomain SubDomain { get; private set; }
+    public SubDomain Subdomain { get; private set; }
     public TenantStatus Status { get; private set; }
     public DateTime? SubscriptionExpiresAt { get; private set; }
 
@@ -26,7 +26,7 @@ public class Tenant : BaseEntity
         var tenant = new Tenant
         {
             Name = TenantName.Create(name),
-            SubDomain = SubDomain.Create(subDomain),
+            Subdomain = SubDomain.Create(subDomain),
             Status = TenantStatus.Active
         };
 
