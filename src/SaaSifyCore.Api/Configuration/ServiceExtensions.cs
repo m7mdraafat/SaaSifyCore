@@ -19,7 +19,7 @@ public static class ServiceExtensions
             {
                 Title = "SaaSifyCore API",
                 Version = "v1",
-                Description = "A multi-tenant SaaS backend boilerplate built with .NET 8, Clean Architecture, and PostgreSQL",
+                Description = "A multi-tenant SaaS backend boilerplate",
                 Contact = new OpenApiContact
                 {
                     Name = "Mohamed Raafat",
@@ -33,6 +33,30 @@ public static class ServiceExtensions
                 }
             });
 
+            // JWT Authentication in Swagger
+            options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token.",
+                Name = "Authorization",
+                In = ParameterLocation.Header,
+                Type = SecuritySchemeType.ApiKey,
+                Scheme = "Bearer"
+            });
+
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                    },
+                    Array.Empty<string>()
+                }
+            });
         });
 
         return services;
