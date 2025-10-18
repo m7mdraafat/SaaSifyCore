@@ -21,4 +21,9 @@ public abstract class BaseEntity
     {
         _domainEvents.Clear();
     }
+
+    public void SetUpdatedAt()
+    {
+        UpdatedAt = DateTime.UtcNow;
+    }
 }

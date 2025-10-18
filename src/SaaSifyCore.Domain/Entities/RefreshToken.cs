@@ -1,4 +1,5 @@
 ﻿using SaaSifyCore.Domain.Common;
+using System.Security.Cryptography;
 
 namespace SaaSifyCore.Domain.Entities;
 
@@ -14,8 +15,13 @@ public class RefreshToken : BaseEntity
     // EF Core constructor
     private RefreshToken() { }
 
-    public static RefreshToken Create(Guid userId, string token, int expiryDays = 30)
+    public static RefreshToken Create(Guid userId, int expiryDays = 30)
     {
+        var tokenBytes = new byte[64];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(tokenBytes);
+        var token = Convert.ToBase64String(tokenBytes);
+
         var refreshToken = new RefreshToken
         {
             Token = token,
