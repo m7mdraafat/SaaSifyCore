@@ -40,8 +40,6 @@ namespace SaaSifyCore.Api.Controllers
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> RegisterAsync([FromBody] RegisterRequest request)
         {
-            // TODO: Implement user registration logic:
-            
             if (!_tenantContext.IsResolved)
             {
                 return BadRequest(new {message = "Tenant context not resolved."});
@@ -66,36 +64,18 @@ namespace SaaSifyCore.Api.Controllers
                 _tenantContext.TenantId!.Value);
 
             await _context.Users.AddAsync(user);
-            await _context.SaveChangesAsync();
-
-            List<RefreshToken> existingTokens = await _context.RefreshTokens
-                .Where(rt => rt.UserId == user.Id && !rt.IsRevoked)
-                .ToListAsync();
-
-            // Keep only last N tokens (e.g., 4 for multiple devices)
-            if (existingTokens.Count >= 4)
-            {
-                var tokensToRevoke = existingTokens
-                    .OrderBy(rt => rt.CreatedAt)
-                    .Take(existingTokens.Count - 3);
-
-                foreach (var token in tokensToRevoke)
-                {
-                    token.Revoke();
-                }
-            }
-
+            
             string jwtToken = _jwtTokenGenerator.GenerateToken(user, _tenantContext.TenantId.Value);
             RefreshToken refreshToken = RefreshToken.Create(user.Id);
-
             await _context.RefreshTokens.AddAsync(refreshToken);
+            
             await _context.SaveChangesAsync();
 
             var response = new AuthResponse
             {
                 AccessToken = jwtToken,
                 RefreshToken = refreshToken.Token,
-                ExpiresAt = DateTime.UtcNow.AddMinutes(60), // Example expiry
+                ExpiresAt = DateTime.UtcNow.AddMinutes(60),
                 User = new UserDto
                 {
                     Id = user.Id,
@@ -126,11 +106,9 @@ namespace SaaSifyCore.Api.Controllers
             var user = await _context.Users
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Email == request.Email && u.TenantId == _tenantContext.TenantId);
-                
 
             string dummyHash = "$2a$12$dummy.hash.for.timing.constant.protection";
             string hashToVerify = user?.PasswordHash ?? dummyHash;
-
             bool isValid = await _passwordHasher.VerifyPasswordAsync(request.Password, hashToVerify);
 
             if (user is null || !isValid)
@@ -138,9 +116,23 @@ namespace SaaSifyCore.Api.Controllers
                 return Unauthorized(new { message = "Invalid email or password." });
             }
 
+            var existingTokens = await _context.RefreshTokens
+                .Where(rt => rt.UserId == user.Id && !rt.IsRevoked)
+                .OrderByDescending(rt => rt.CreatedAt)
+                .ToListAsync();
+
+            // Keep only the 4 most recent tokens
+            if (existingTokens.Count >= 4)
+            {
+                var tokensToRevoke = existingTokens.Skip(3);
+                foreach (var token in tokensToRevoke)
+                {
+                    token.Revoke();
+                }
+            }
+            
             string accessToken = _jwtTokenGenerator.GenerateToken(user, _tenantContext.TenantId!.Value);
             RefreshToken refreshToken = RefreshToken.Create(user.Id);
-
             await _context.RefreshTokens.AddAsync(refreshToken);
 
             await _context.SaveChangesAsync();
