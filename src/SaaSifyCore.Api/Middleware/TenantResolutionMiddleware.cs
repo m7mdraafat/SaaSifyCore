@@ -1,8 +1,11 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using SaaSifyCore.Domain.Entities;
 using SaaSifyCore.Domain.Enums;
 using SaaSifyCore.Domain.Interfaces;
+using SaaSifyCore.Domain.ValueObjects;
 using SaaSifyCore.Infrastructure.MultiTenancy;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace SaaSifyCore.Api.Middleware;
@@ -10,10 +13,15 @@ namespace SaaSifyCore.Api.Middleware;
 public class TenantResolutionMiddleware
 {
     private readonly RequestDelegate _next;
-    private static readonly Regex SubdomainRegex = 
+    private readonly IDistributedCache _cache;
+    private static readonly Regex SubdomainRegex =
         new("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public TenantResolutionMiddleware(RequestDelegate next) => _next = next;
+    public TenantResolutionMiddleware(RequestDelegate next, IDistributedCache cache)
+    {
+        _next = next;
+        _cache = cache;
+    }
 
     public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, IApplicationDbContext dbContext)
     {
@@ -41,8 +49,35 @@ public class TenantResolutionMiddleware
             return;
         }
 
-        Tenant tenant = await dbContext.Tenants
-            .AsNoTracking().FirstOrDefaultAsync(t => t.Subdomain.Value == subdomain);
+        var cacheKey = $"tenant:{subdomain}";
+        var cachedTenant = await _cache.GetStringAsync(cacheKey);
+
+        Tenant? tenant;
+        if (!string.IsNullOrEmpty(cachedTenant))
+        {
+            tenant = JsonSerializer.Deserialize<TenantCacheDto>(cachedTenant)?.ToTenant();
+        }
+        else
+        {
+            // Cache miss - fetch from database
+            tenant = await dbContext.Tenants
+                .Where(t => t.Subdomain == SubDomain.Create(subdomain))
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
+
+            if (tenant is not null)
+            {
+                // Cache for 1 hour
+                var cacheDto = TenantCacheDto.FromTenant(tenant);
+                await _cache.SetStringAsync(
+                    cacheKey,
+                    JsonSerializer.Serialize(cacheDto),
+                    new DistributedCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1)
+                    });
+            }
+        }
 
         if (tenant is null)
         {
@@ -92,4 +127,19 @@ public class TenantResolutionMiddleware
         return null;
     }
 
+    private record TenantCacheDto(Guid Id, string Subdomain, TenantStatus Status)
+    {
+        public static TenantCacheDto FromTenant(Tenant tenant) =>
+            new(tenant.Id, tenant.Subdomain.Value, tenant.Status);
+
+        public Tenant ToTenant()
+        {
+            // Use reflection or factory to reconstruct minimal tenant
+            var tenant = (Tenant)Activator.CreateInstance(typeof(Tenant), true)!;
+            typeof(Tenant).GetProperty("Id")!.SetValue(tenant, Id);
+            typeof(Tenant).GetProperty("Subdomain")!.SetValue(tenant, SubDomain.Create(Subdomain));
+            typeof(Tenant).GetProperty("Status")!.SetValue(tenant, Status);
+            return tenant;
+        }
+    }
 }
