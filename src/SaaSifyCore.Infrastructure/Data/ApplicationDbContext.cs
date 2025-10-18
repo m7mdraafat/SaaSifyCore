@@ -50,39 +50,50 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        // BEST PRACTICE: Automatically set CreatedAt/UpdatedAt timestamps
-        foreach (var entry in ChangeTracker.Entries<BaseEntity>())
+        var now = DateTime.UtcNow;
+        var entries = ChangeTracker.Entries<BaseEntity>().ToList();
+
+        // Batch process: timestamps and domain events in one loop
+        var domainEvents = new List<DomainEvent>();
+
+        foreach (var entry in entries)
         {
-            // Set UpdatedAt using reflection (since BaseEntity uses protected setter)
-            var property = entry.Entity.GetType().GetProperty("UpdatedAt");
-            if (property != null)
+            switch (entry.State)
             {
-                property.SetValue(entry.Entity, DateTime.UtcNow);
+                case EntityState.Added:
+                    // CreatedAt set by entity constructor
+                    break;
+
+                case EntityState.Modified:
+                    // Direct property access (cached), no reflection
+                    if (entry.Entity is BaseEntity entity)
+                    {
+                        // Use SetUpdatedAt method instead of reflection
+                        entity.SetUpdatedAt();
+                    }
+                    break;
+            }
+
+            // Collect domain events
+            if (entry.Entity.DomainEvents.Any())
+            {
+                domainEvents.AddRange(entry.Entity.DomainEvents);
             }
         }
 
-        // BEST PRACTICE: Collect domain events before saving changes
-        var domainEvents = ChangeTracker.Entries<BaseEntity>()
-            .Select(e => e.Entity)
-            .Where(e => e.DomainEvents.Any())
-            .SelectMany(e => e.DomainEvents)
-            .ToList();
-
-        // Save changes to the database
         var result = await base.SaveChangesAsync(cancellationToken);
 
-        // BEST PRACTICE: Clear domain events after successful save
-        // (In production, you'd dispatch these to handlers here via MediatR or similar)
+        // TODO: Dispatch domain events asynchronously (don't block)
 
-        foreach (var entry in ChangeTracker.Entries<BaseEntity>())
+        // Clear events
+        foreach (var entry in entries)
         {
             entry.Entity.ClearDomainEvents();
         }
 
-        // TODO: Dispatch domain events to handlers ( Application Layer responsibility)
-
         return result;
     }
+
     /// <summary>
     /// Applies global query filters for automatic tenant isolation.
     /// These filters ensure queries automatically filter by the current tenant.

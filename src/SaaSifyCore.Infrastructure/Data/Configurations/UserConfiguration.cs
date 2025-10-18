@@ -24,12 +24,13 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("Email")
             .HasMaxLength(256)
             .IsRequired();
-        
+
         // Now we can create indexes normally
-        builder.HasIndex(u => u.Email)
+        builder.HasIndex(u => new { u.Email, u.TenantId })
             .IsUnique()
-            .HasDatabaseName("IX_Users_Email");
-        
+            .HasDatabaseName("IX_Users_Email_TenantId")
+            .IncludeProperties(u => new { u.PasswordHash, u.FirstName, u.LastName, u.Role }); // Covering index.
+
         builder.Property(u => u.PasswordHash)
             .HasMaxLength(500)
             .IsRequired();

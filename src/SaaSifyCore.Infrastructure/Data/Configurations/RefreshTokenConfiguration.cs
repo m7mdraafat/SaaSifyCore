@@ -41,6 +41,14 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
         builder.HasIndex(rt => rt.ExpiresAt)
             .HasDatabaseName("IX_RefreshTokens_ExpiresAt"); // For cleanup jobs
 
+
+        builder.HasIndex(rt => new { rt.Token, rt.IsRevoked, rt.ExpiresAt })
+             .HasDatabaseName("IX_RefreshTokens_Token_Status_ExpiresAt")
+             .HasFilter("\"IsRevoked\" = false"); // Partial index for active tokens only.
+
+        builder.HasIndex(rt => new { rt.UserId, rt.IsRevoked, rt.CreatedAt })
+            .HasDatabaseName("IX_RefreshTokens_UserId_Status_CreatedAt");
+
         builder.Ignore(rt => rt.DomainEvents);
     }
 }
