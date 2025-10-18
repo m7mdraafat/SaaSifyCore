@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using SaaSifyCore.Domain.Interfaces;
 using SaaSifyCore.Infrastructure.Data;
 using SaaSifyCore.Infrastructure.MultiTenancy;
+using SaaSifyCore.Infrastructure.Security;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Infrastructure layer dependency injection configuration.
@@ -55,6 +57,14 @@ public static class DependencyInjection
             provider.GetRequiredService<ApplicationDbContext>());
 
         services.AddScoped<ITenantContext, TenantContext>();
+        services.AddSingleton<IPasswordHasher, PasswordHasher>();
+        services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
+
+        // JWT Settings (bind from configuration)
+        services.AddOptions<JwtSettings>()
+            .Bind(configuration.GetSection(JwtSettings.SectionName))
+            .ValidateOnStart();
+
         // TODO: Add other infrastructure services here as we build them:
         // - Email services (Phase 3)
         // - Blob storage (Phase 3)
