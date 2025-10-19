@@ -15,6 +15,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public static class DependencyInjection
 {
+    private const string TestingEnvironment = "Testing";
+
     /// <summary>
     /// Registers Infrastructure layer services.
     /// </summary>
@@ -22,39 +24,50 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Register DbContext
-        services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        if (environment != TestingEnvironment)
         {
-            var connectionString = configuration.GetConnectionString("DefaultConnection")
-                ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-
-            options.UseNpgsql(connectionString, npgsqlOptions =>
+            // Register DbContext
+            services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
             {
-                // Store migrations in Infrastructure project
-                npgsqlOptions.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
+                var connectionString = configuration.GetConnectionString("DefaultConnection")
+                    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 
-                // Retry on transient failures
-                npgsqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(5),
-                    errorCodesToAdd: null);
+                options.UseNpgsql(connectionString, npgsqlOptions =>
+                {
+                    // Store migrations in Infrastructure project
+                    npgsqlOptions.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
 
-                // Command timeout for long-running queries
-                npgsqlOptions.CommandTimeout(30);
+                    // Retry on transient failures
+                    npgsqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay: TimeSpan.FromSeconds(5),
+                        errorCodesToAdd: null);
+
+                    // Performance optimizations
+                    npgsqlOptions.CommandTimeout(30); // seconds
+                    npgsqlOptions.MaxBatchSize(100);
+                    npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+                });
+
+                // Enable detailed errors and sensitive data logging in Development
+                if (environment == "Development")
+                {
+                    options.EnableSensitiveDataLogging();
+                    options.EnableDetailedErrors();
+                }
+                else
+                {
+                    // Production optimizations
+                    options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTrackingWithIdentityResolution);
+                }
             });
 
-            // Enable detailed errors and sensitive data logging in Development
-            var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-            if (environment == "Development")
-            {
-                options.EnableSensitiveDataLogging();
-                options.EnableDetailedErrors();
-            }
-        });
-
-        // Register IApplicationDbContext interface for Application layer
-        services.AddScoped<IApplicationDbContext>(provider =>
-            provider.GetRequiredService<ApplicationDbContext>());
+            // Register IApplicationDbContext interface for Application layer
+            services.AddScoped<IApplicationDbContext>(provider =>
+                provider.GetRequiredService<ApplicationDbContext>());
+        }
 
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
