@@ -1,5 +1,5 @@
 # SaaSifyCore
-### A modern, multi-tenant SaaS backend boilerplate built with **.NET 8** and **Azure**
+### A modern, multi-tenant SaaS backend boilerplate built with **.NET 9** and **Azure**
 
 ---
 
