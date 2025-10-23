@@ -68,16 +68,16 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
                 SubDomain.Create("testtenant2"));
     
             Context.Tenants.AddRange(tenant1, tenant2);
+            await Context.SaveChangesAsync();
+        }
+    }
+
     /// <summary>
     /// Disposes resources used by the test, including scope and client, to ensure proper cleanup after each test run.
     /// </summary>
     ValueTask IAsyncDisposable.DisposeAsync()
     {
         Scope?.Dispose();
-        Client?.Dispose();
-        return ValueTask.CompletedTask;
-    }
-}       Scope?.Dispose();
         Client?.Dispose();
         return ValueTask.CompletedTask;
     }
