@@ -1,6 +1,7 @@
 ﻿using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using SaaSifyCore.Api.DTOs.Auth;
+using SaaSifyCore.Application.Commands.Auth;
 using System.Net;
 using System.Net.Http.Json;
 

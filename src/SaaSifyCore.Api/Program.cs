@@ -3,6 +3,7 @@ using Serilog;
 using Serilog.Events;
 using SaaSifyCore.Api.Configuration;
 using SaaSifyCore.Api.Middleware;
+using SaaSifyCore.Application;
 using SaaSifyCore.Infrastructure;
 using SaaSifyCore.Infrastructure.Data;
 
@@ -33,6 +34,9 @@ try
 
     // Use Serilog for logging
     builder.Host.UseSerilog();
+
+    // Add Application layer services (MediatR, CQRS handlers)
+    builder.Services.AddApplication();
 
     builder.Services.AddInfrastructure(builder.Configuration);
 

@@ -1,11 +1,10 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SaaSifyCore.Api.DTOs.Auth;
-using SaaSifyCore.Domain.Entities;
-using SaaSifyCore.Domain.Enums;
+using SaaSifyCore.Application.Commands.Auth;
 using SaaSifyCore.Domain.Interfaces;
-using SaaSifyCore.Domain.ValueObjects;
 using System.Security.Claims;
 
 namespace SaaSifyCore.Api.Controllers
@@ -14,20 +13,17 @@ namespace SaaSifyCore.Api.Controllers
     [ApiController]
     public class AuthController : ControllerBase
     {
+        private readonly IMediator _mediator;
         private readonly IApplicationDbContext _context;
-        private readonly IPasswordHasher _passwordHasher;
-        private readonly IJwtTokenGenerator _jwtTokenGenerator;
         private readonly ITenantContext _tenantContext;
 
         public AuthController(
+            IMediator mediator,
             IApplicationDbContext context,
-            IPasswordHasher passwordHasher,
-            IJwtTokenGenerator jwtTokenGenerator,
             ITenantContext tenantContext)
         {
+            _mediator = mediator;
             _context = context;
-            _passwordHasher = passwordHasher;
-            _jwtTokenGenerator = jwtTokenGenerator;
             _tenantContext = tenantContext;
         }
 
@@ -45,48 +41,34 @@ namespace SaaSifyCore.Api.Controllers
                 return BadRequest(new {message = "Tenant context not resolved."});
             }
 
-            var emailExists = await _context.Users
-                .AnyAsync(u => u.Email == request.Email && u.TenantId == _tenantContext.TenantId);
+            // Create command
+            var command = new RegisterCommand(
+                Email: request.Email,
+                Password: request.Password,
+                FirstName: request.FirstName,
+                LastName: request.LastName,
+                TenantId: _tenantContext.TenantId!.Value
+            );
 
-            if (emailExists)
+            // Send command via MediatR
+            var result = await _mediator.Send(command);
+
+            // Handle result with Result pattern
+            if (result.IsFailure)
             {
-                return Conflict(new { message = "Email already in use for this tenant." });
+                return result.Error.Code switch
+                {
+                    "User.EmailAlreadyExists" => Conflict(new { message = result.Error.Message }),
+                    "Tenant.NotFound" => BadRequest(new { message = result.Error.Message }),
+                    "Tenant.NotActive" => BadRequest(new { message = result.Error.Message }),
+                    var code when code.StartsWith("Validation") => BadRequest(new { message = result.Error.Message }),
+                    _ => BadRequest(new { message = result.Error.Message })
+                };
             }
 
-            string hashedPassword = await _passwordHasher.HashPasswordAsync(request.Password);
-
-            var user = SaaSifyCore.Domain.Entities.User.Create(
-                Email.Create(request.Email),
-                hashedPassword,
-                request.FirstName,
-                request.LastName,
-                UserRole.User,
-                _tenantContext.TenantId!.Value);
-
-            await _context.Users.AddAsync(user);
+            var authResponse = result.Value;
             
-            string jwtToken = _jwtTokenGenerator.GenerateToken(user, _tenantContext.TenantId.Value);
-            RefreshToken refreshToken = RefreshToken.Create(user.Id);
-            await _context.RefreshTokens.AddAsync(refreshToken);
-            
-            await _context.SaveChangesAsync();
-
-            var response = new AuthResponse
-            {
-                AccessToken = jwtToken,
-                RefreshToken = refreshToken.Token,
-                ExpiresAt = DateTime.UtcNow.AddMinutes(60),
-                User = new UserDto
-                {
-                    Id = user.Id,
-                    Email = user.Email.Value,
-                    FirstName = user.FirstName,
-                    LastName = user.LastName,
-                    Role = user.Role.ToString()
-                }
-            };
-            
-            return CreatedAtAction(nameof(GetCurrentUser), new { id = user.Id }, response);
+            return CreatedAtAction(nameof(GetCurrentUser), new { id = authResponse.User.Id }, authResponse);
         }
 
         /// <summary>
@@ -103,55 +85,30 @@ namespace SaaSifyCore.Api.Controllers
                 return BadRequest(new {message = "Tenant context not resolved."});
             }
 
-            var user = await _context.Users
-                .AsNoTracking()
-                .FirstOrDefaultAsync(u => u.Email == request.Email && u.TenantId == _tenantContext.TenantId);
+            // Create command
+            var command = new LoginCommand(
+                Email: request.Email,
+                Password: request.Password,
+                TenantId: _tenantContext.TenantId!.Value
+            );
 
-            string dummyHash = "$2a$12$dummy.hash.for.timing.constant.protection";
-            string hashToVerify = user?.PasswordHash ?? dummyHash;
-            bool isValid = await _passwordHasher.VerifyPasswordAsync(request.Password, hashToVerify);
+            // Send command via MediatR
+            var result = await _mediator.Send(command);
 
-            if (user is null || !isValid)
+            // Handle result with Result pattern
+            if (result.IsFailure)
             {
-                return Unauthorized(new { message = "Invalid email or password." });
+                return result.Error.Code switch
+                {
+                    "User.InvalidCredentials" => Unauthorized(new { message = result.Error.Message }),
+                    "User.EmailNotVerified" => Unauthorized(new { message = result.Error.Message }),
+                    _ => BadRequest(new { message = result.Error.Message })
+                };
             }
 
-            var existingTokens = await _context.RefreshTokens
-                .Where(rt => rt.UserId == user.Id && !rt.IsRevoked)
-                .OrderByDescending(rt => rt.CreatedAt)
-                .ToListAsync();
+            var authResponse = result.Value;
 
-            // Keep only the 4 most recent tokens
-            if (existingTokens.Count >= 4)
-            {
-                var tokensToRevoke = existingTokens.Skip(3);
-                foreach (var token in tokensToRevoke)
-                {
-                    token.Revoke();
-                }
-            }
-            
-            string accessToken = _jwtTokenGenerator.GenerateToken(user, _tenantContext.TenantId!.Value);
-            RefreshToken refreshToken = RefreshToken.Create(user.Id);
-            await _context.RefreshTokens.AddAsync(refreshToken);
-
-            await _context.SaveChangesAsync();
-
-            var response = new AuthResponse
-            {
-                AccessToken = accessToken,
-                RefreshToken = refreshToken.Token,
-                ExpiresAt = DateTime.UtcNow.AddMinutes(60),
-                User = new UserDto
-                {
-                    Id = user.Id,
-                    Email = user.Email.Value,
-                    FirstName = user.FirstName,
-                    LastName = user.LastName,
-                    Role = user.Role.ToString()
-                }
-            };
-            return Ok(response);
+            return Ok(authResponse);
         }
 
         /// <summary>
@@ -162,56 +119,35 @@ namespace SaaSifyCore.Api.Controllers
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> RefreshTokenAsync([FromBody] RefreshTokenRequest request)
         {
-            var refreshToken = await _context.RefreshTokens
-                .IgnoreQueryFilters()
-                .Include(rt => rt.User)
-                .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
-
-            if (refreshToken is null ||
-                refreshToken.User.TenantId != _tenantContext.TenantId)
+            if (!_tenantContext.IsResolved)
             {
-                // TODO: Log security event if tenant mismatch
-                return Unauthorized(new { message = "Invalid refresh token." });
+                return BadRequest(new {message = "Tenant context not resolved."});
             }
 
-            if (refreshToken.IsRevoked)
+            // Create command
+            var command = new RefreshTokenCommand(
+                RefreshToken: request.RefreshToken,
+                TenantId: _tenantContext.TenantId!.Value
+            );
+
+            // Send command via MediatR
+            var result = await _mediator.Send(command);
+
+            // Handle result with Result pattern
+            if (result.IsFailure)
             {
-                return Unauthorized(new { message = "Refresh token has been revoked." });
-            }
-
-            if (refreshToken.ExpiresAt <= DateTime.UtcNow)
-            {
-                return Unauthorized(new { message = "Refresh token has expired." });
-            }
-            
-            var user = refreshToken.User;
-
-            // Revoke old token
-            refreshToken.Revoke();
-
-            // Generate new tokens.
-            var newAccessToken = _jwtTokenGenerator.GenerateToken(user, _tenantContext.TenantId!.Value);
-            var newRefreshToken = RefreshToken.Create(user.Id);
-
-            await _context.RefreshTokens.AddAsync(newRefreshToken);
-            await _context.SaveChangesAsync();
-
-            var response = new AuthResponse
-            {
-                AccessToken = newAccessToken,
-                RefreshToken = newRefreshToken.Token,
-                ExpiresAt = DateTime.UtcNow.AddMinutes(60),
-                User = new UserDto
+                return result.Error.Code switch
                 {
-                    Id = user.Id,
-                    Email = user.Email.Value,
-                    FirstName = user.FirstName,
-                    LastName = user.LastName,
-                    Role = user.Role.ToString()
-                }
-            };
+                    "Auth.InvalidToken" => Unauthorized(new { message = result.Error.Message }),
+                    "Auth.TokenExpired" => Unauthorized(new { message = result.Error.Message }),
+                    "Auth.RefreshTokenRevoked" => Unauthorized(new { message = result.Error.Message }),
+                    _ => BadRequest(new { message = result.Error.Message })
+                };
+            }
 
-            return Ok(response);
+            var authResponse = result.Value;
+
+            return Ok(authResponse);
         }
 
         /// <summary>
@@ -220,18 +156,32 @@ namespace SaaSifyCore.Api.Controllers
         [Authorize]
         [HttpPost("logout")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Logout([FromBody] RefreshTokenRequest request)
         {
-            var refreshToken = await _context.RefreshTokens
-                .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
-
-            if (refreshToken is null)
+            if (!_tenantContext.IsResolved)
             {
-                return NotFound(new {message = "Refresh token not found."});
+                return BadRequest(new {message = "Tenant context not resolved."});
             }
 
-            refreshToken.Revoke();
-            await _context.SaveChangesAsync();
+            // Create command
+            var command = new LogoutCommand(
+                RefreshToken: request.RefreshToken,
+                TenantId: _tenantContext.TenantId!.Value
+            );
+
+            // Send command via MediatR
+            var result = await _mediator.Send(command);
+
+            // Handle result with Result pattern
+            if (result.IsFailure)
+            {
+                return result.Error.Code switch
+                {
+                    "Auth.InvalidToken" => NotFound(new { message = result.Error.Message }),
+                    _ => BadRequest(new { message = result.Error.Message })
+                };
+            }
 
             return NoContent();
         }
@@ -268,13 +218,13 @@ namespace SaaSifyCore.Api.Controllers
             UserDto? userDto = await _context.Users
                 .Where(u => u.Id == userId && u.TenantId == _tenantContext.TenantId)
                 .Select(u => new UserDto
-                {
-                    Id = u.Id,
-                    Email = u.Email.Value,
-                    FirstName = u.FirstName,
-                    LastName = u.LastName,
-                    Role = u.Role.ToString(),
-                })
+                (
+                    u.Id,
+                    u.Email.Value,
+                    u.FirstName,
+                    u.LastName,
+                    u.Role.ToString()
+                ))
                 .AsNoTracking()
                 .FirstOrDefaultAsync();
 

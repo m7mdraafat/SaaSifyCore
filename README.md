@@ -32,7 +32,7 @@ SaaSifyCore provides secure authentication, tenant management, subscription hand
 
 | Layer | Technology | Purpose |
 |-------|-------------|----------|
-| Backend | **.NET 8 Web API** | High performance, maintainable, and scalable |
+| Backend | **.NET 9 Web API** | High performance, maintainable, and scalable |
 | Database | **PostgreSQL (via EF Core)** | Multi-tenant support, open-source, reliable |
 | Authentication | **JWT + Refresh Tokens, OAuth 2.0** | Modern, secure, and easily extensible |
 | Payments | **Stripe Integration** | Universal SaaS billing and subscription management |
