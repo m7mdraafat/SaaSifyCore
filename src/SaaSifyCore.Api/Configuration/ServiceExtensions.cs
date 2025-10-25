@@ -1,4 +1,6 @@
-﻿namespace SaaSifyCore.Api.Configuration;
+﻿using SaaSifyCore.Api.Services;
+
+namespace SaaSifyCore.Api.Configuration;
 
 /// <summary>
 /// API layer service configuration extensions.
@@ -21,6 +23,21 @@ public static class ServiceExtensions
                     .AllowAnyHeader();
             });
         });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers API layer services following SOLID principles.
+    /// </summary>
+    public static IServiceCollection AddApiServices(this IServiceCollection services)
+    {
+        // Register HTTP context accessor (required for cookie service)
+        services.AddHttpContextAccessor();
+
+        // Register application services
+        services.AddScoped<IRefreshTokenCookieService, RefreshTokenCookieService>();
+        services.AddScoped<IResultMapper, ResultMapper>();
 
         return services;
     }
