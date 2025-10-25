@@ -48,6 +48,14 @@ public static class DomainErrors
         public static Error AlreadyDeactivated => new(
             "User.AlreadyDeactivated",
             "The user is already deactivated");
+
+        public static Error UserNotFound => new(
+            "User.UserNotFound",
+            "User not found");
+
+        public static Error TenantMismatch => new(
+            "User.TenantMismatch",
+            "User does not belong to this tenant");
     }
 
     public static class Tenant
@@ -78,6 +86,14 @@ public static class DomainErrors
         public static Error RefreshTokenRevoked => new(
             "Auth.RefreshTokenRevoked",
             "The refresh token has been revoked");
+
+        public static Error InvalidRefreshToken => new(
+            "Auth.InvalidRefreshToken",
+            "The refresh token is invalid");
+
+        public static Error RefreshTokenExpired => new(
+            "Auth.RefreshTokenExpired",
+            "The refresh token has expired");
 
         public static Error TenantContextNotResolved => new(
             "Auth.TenantContextNotResolved",
