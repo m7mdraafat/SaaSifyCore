@@ -1,9 +1,12 @@
 ﻿using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using SaaSifyCore.Api.Configuration;
+using SaaSifyCore.Api.DTOs;
 using SaaSifyCore.Api.DTOs.Auth;
+using SaaSifyCore.Api.Services;
 using SaaSifyCore.Application.Commands.Auth;
+using SaaSifyCore.Application.Queries.Auth;
 using SaaSifyCore.Domain.Interfaces;
 using System.Security.Claims;
 
@@ -14,34 +17,36 @@ namespace SaaSifyCore.Api.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IMediator _mediator;
-        private readonly IApplicationDbContext _context;
         private readonly ITenantContext _tenantContext;
+        private readonly IRefreshTokenCookieService _cookieService;
+        private readonly IResultMapper _resultMapper;
 
         public AuthController(
             IMediator mediator,
-            IApplicationDbContext context,
-            ITenantContext tenantContext)
+            ITenantContext tenantContext,
+            IRefreshTokenCookieService cookieService,
+            IResultMapper resultMapper)
         {
             _mediator = mediator;
-            _context = context;
             _tenantContext = tenantContext;
+            _cookieService = cookieService;
+            _resultMapper = resultMapper;
         }
 
         /// <summary>
         /// Register a new user for the current tenant.
         /// </summary>
         [HttpPost("register")]
-        [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status201Created)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
         public async Task<IActionResult> RegisterAsync([FromBody] RegisterRequest request)
         {
             if (!_tenantContext.IsResolved)
             {
-                return BadRequest(new {message = "Tenant context not resolved."});
+                return BadRequest(ApiResponse.FailureResponse("Tenant context not resolved."));
             }
 
-            // Create command
             var command = new RegisterCommand(
                 Email: request.Email,
                 Password: request.Password,
@@ -50,185 +55,181 @@ namespace SaaSifyCore.Api.Controllers
                 TenantId: _tenantContext.TenantId!.Value
             );
 
-            // Send command via MediatR
             var result = await _mediator.Send(command);
 
-            // Handle result with Result pattern
-            if (result.IsFailure)
-            {
-                return result.Error.Code switch
-                {
-                    "User.EmailAlreadyExists" => Conflict(new { message = result.Error.Message }),
-                    "Tenant.NotFound" => BadRequest(new { message = result.Error.Message }),
-                    "Tenant.NotActive" => BadRequest(new { message = result.Error.Message }),
-                    var code when code.StartsWith("Validation") => BadRequest(new { message = result.Error.Message }),
-                    _ => BadRequest(new { message = result.Error.Message })
-                };
-            }
-
-            var authResponse = result.Value;
-            
-            return CreatedAtAction(nameof(GetCurrentUser), new { id = authResponse.User.Id }, authResponse);
+            return _resultMapper.MapToActionResult(
+                result,
+                onSuccess: () => StatusCode(
+                    StatusCodes.Status201Created,
+                    ApiResponse.SuccessResponse("Account created. Please verify your email.")));
         }
 
         /// <summary>
         /// Login with email and password for the current tenant.
+        /// Returns access token in response and refresh token in HTTP-only cookie.
         /// </summary>
         [HttpPost("login")]
-        [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<LoginResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status429TooManyRequests)]
         public async Task<IActionResult> LoginAsync([FromBody] LoginRequest request)
         {
             if (!_tenantContext.IsResolved)
             {
-                return BadRequest(new {message = "Tenant context not resolved."});
+                return BadRequest(ApiResponse.FailureResponse("Tenant context not resolved."));
             }
 
-            // Create command
             var command = new LoginCommand(
                 Email: request.Email,
                 Password: request.Password,
                 TenantId: _tenantContext.TenantId!.Value
             );
 
-            // Send command via MediatR
             var result = await _mediator.Send(command);
 
-            // Handle result with Result pattern
-            if (result.IsFailure)
-            {
-                return result.Error.Code switch
+            return _resultMapper.MapToActionResult(
+                result,
+                onSuccess: authResponse =>
                 {
-                    "User.InvalidCredentials" => Unauthorized(new { message = result.Error.Message }),
-                    "User.EmailNotVerified" => Unauthorized(new { message = result.Error.Message }),
-                    _ => BadRequest(new { message = result.Error.Message })
-                };
-            }
+                    // Set refresh token in secure cookie
+                    _cookieService.SetRefreshTokenCookie(
+                        authResponse.RefreshToken,
+                        authResponse.ExpiresAt.AddDays(AuthConstants.RefreshTokenExpirationDays));
 
-            var authResponse = result.Value;
+                    // Return only access token
+                    var loginResponse = new LoginResponse(
+                        AccessToken: authResponse.AccessToken,
+                        ExpiresIn: AuthConstants.AccessTokenExpirationSeconds
+                    );
 
-            return Ok(authResponse);
+                    return Ok(ApiResponse<LoginResponse>.SuccessResponse(loginResponse));
+                });
         }
 
         /// <summary>
-        /// Refresh access token using a valid refresh token.
+        /// Refresh access token using refresh token from cookie.
+        /// Rotates refresh token on every use (security best practice).
         /// </summary>
-        [HttpPost("refresh")]
-        [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<IActionResult> RefreshTokenAsync([FromBody] RefreshTokenRequest request)
+        [HttpPost("refresh-token")]
+        [ProducesResponseType(typeof(ApiResponse<LoginResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> RefreshTokenAsync()
         {
             if (!_tenantContext.IsResolved)
             {
-                return BadRequest(new {message = "Tenant context not resolved."});
+                return BadRequest(ApiResponse.FailureResponse("Tenant context not resolved."));
             }
 
-            // Create command
+            var refreshToken = _cookieService.GetRefreshTokenFromCookie();
+            if (refreshToken is null)
+            {
+                return Unauthorized(ApiResponse.FailureResponse("Invalid or expired refresh token."));
+            }
+
             var command = new RefreshTokenCommand(
-                RefreshToken: request.RefreshToken,
+                RefreshToken: refreshToken,
                 TenantId: _tenantContext.TenantId!.Value
             );
 
-            // Send command via MediatR
             var result = await _mediator.Send(command);
 
-            // Handle result with Result pattern
             if (result.IsFailure)
             {
-                return result.Error.Code switch
-                {
-                    "Auth.InvalidToken" => Unauthorized(new { message = result.Error.Message }),
-                    "Auth.TokenExpired" => Unauthorized(new { message = result.Error.Message }),
-                    "Auth.RefreshTokenRevoked" => Unauthorized(new { message = result.Error.Message }),
-                    _ => BadRequest(new { message = result.Error.Message })
-                };
+                _cookieService.DeleteRefreshTokenCookie();
             }
 
-            var authResponse = result.Value;
+            return _resultMapper.MapToActionResult(
+                result,
+                onSuccess: authResponse =>
+                {
+                    // Rotate refresh token (set new one)
+                    _cookieService.SetRefreshTokenCookie(
+                        authResponse.RefreshToken,
+                        authResponse.ExpiresAt.AddDays(AuthConstants.RefreshTokenExpirationDays));
 
-            return Ok(authResponse);
+                    var loginResponse = new LoginResponse(
+                        AccessToken: authResponse.AccessToken,
+                        ExpiresIn: AuthConstants.AccessTokenExpirationSeconds
+                    );
+
+                    return Ok(ApiResponse<LoginResponse>.SuccessResponse(loginResponse));
+                });
         }
 
         /// <summary>
-        /// Logout (revoke refresh token).
+        /// Logout - revoke refresh token and clear cookie.
+        /// No JWT required - validates refresh token from cookie.
         /// </summary>
-        [Authorize]
         [HttpPost("logout")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> Logout([FromBody] RefreshTokenRequest request)
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> Logout()
         {
             if (!_tenantContext.IsResolved)
             {
-                return BadRequest(new {message = "Tenant context not resolved."});
+                return BadRequest(ApiResponse.FailureResponse("Tenant context not resolved."));
             }
 
-            // Create command
-            var command = new LogoutCommand(
-                RefreshToken: request.RefreshToken,
-                TenantId: _tenantContext.TenantId!.Value
-            );
-
-            // Send command via MediatR
-            var result = await _mediator.Send(command);
-
-            // Handle result with Result pattern
-            if (result.IsFailure)
+            var refreshToken = _cookieService.GetRefreshTokenFromCookie();
+            if (refreshToken is not null)
             {
-                return result.Error.Code switch
-                {
-                    "Auth.InvalidToken" => NotFound(new { message = result.Error.Message }),
-                    _ => BadRequest(new { message = result.Error.Message })
-                };
+                var command = new LogoutCommand(
+                    RefreshToken: refreshToken,
+                    TenantId: _tenantContext.TenantId!.Value
+                );
+
+                // Send command (ignore result - logout is idempotent)
+                await _mediator.Send(command);
             }
 
-            return NoContent();
+            // Always clear the cookie
+            _cookieService.DeleteRefreshTokenCookie();
+
+            return Ok(ApiResponse.SuccessResponse("Logout successful."));
         }
 
         /// <summary>
-        /// Get current user info.
+        /// Get current authenticated user info.
+        /// Validates tenant claim matches request tenant.
         /// </summary>
         [Authorize]
         [HttpGet("me")]
-        [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<UserDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetCurrentUser()
+        {
+            var userId = GetUserIdFromClaims();
+            if (userId is null)
+            {
+                return Unauthorized(ApiResponse.FailureResponse("Invalid or expired access token."));
+            }
+
+            if (!_tenantContext.IsResolved)
+            {
+                return BadRequest(ApiResponse.FailureResponse("Tenant context not resolved."));
+            }
+
+            var query = new GetCurrentUserQuery(
+                UserId: userId.Value,
+                TenantId: _tenantContext.TenantId!.Value
+            );
+
+            var result = await _mediator.Send(query);
+
+            return _resultMapper.MapToActionResult(
+                result,
+                onSuccess: userDto => Ok(ApiResponse<UserDto>.SuccessResponse(userDto)));
+        }
+
+        private Guid? GetUserIdFromClaims()
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier)
                 ?? User.FindFirstValue("sub");
 
-            if (userIdClaim is null || !Guid.TryParse(userIdClaim, out var userId))
-            {
-                return Unauthorized(new { message = "Invalid user token." });
-            }
-
-            UserDto? userDto = await this.GetUserDto(userId);
-
-            if (userDto is null)
-            {
-                return NotFound(new { message = "User not found." });
-            }
-
-            return Ok(userDto);
-        }
-
-
-        private async Task<UserDto?> GetUserDto(Guid userId)
-        {
-            UserDto? userDto = await _context.Users
-                .Where(u => u.Id == userId && u.TenantId == _tenantContext.TenantId)
-                .Select(u => new UserDto
-                (
-                    u.Id,
-                    u.Email.Value,
-                    u.FirstName,
-                    u.LastName,
-                    u.Role.ToString()
-                ))
-                .AsNoTracking()
-                .FirstOrDefaultAsync();
-
-            return userDto;
+            return Guid.TryParse(userIdClaim, out var userId) ? userId : null;
         }
     }
 }
