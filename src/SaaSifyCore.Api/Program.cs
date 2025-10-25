@@ -50,6 +50,9 @@ try
     builder.Services.AddEndpointsApiExplorer(); // Required for API endpoint exploration
     builder.Services.AddCorsPolicy(builder.Configuration);
 
+    // Add API services (cookie service, result mapper)
+    builder.Services.AddApiServices();
+
     builder.Services.AddDistributedMemoryCache();
 
     var app = builder.Build();
