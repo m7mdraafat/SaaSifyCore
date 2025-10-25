@@ -25,7 +25,14 @@ public class LogoutCommandHandler : IRequestHandler<LogoutCommand, Result>
 
         if (refreshToken is null)
         {
+            // Token not found - could be invalid or doesn't belong to tenant
             return Result.Failure(DomainErrors.Auth.InvalidToken);
+        }
+
+        // Check if token is already revoked
+        if (refreshToken.IsRevoked)
+        {
+            return Result.Failure(DomainErrors.Auth.RefreshTokenRevoked);
         }
 
         // Revoke the token

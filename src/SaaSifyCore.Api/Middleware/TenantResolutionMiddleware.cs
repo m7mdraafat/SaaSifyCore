@@ -10,6 +10,11 @@ using System.Text.RegularExpressions;
 
 namespace SaaSifyCore.Api.Middleware;
 
+/// <summary>
+/// Middleware for resolving tenant context from subdomain.
+/// Production: Extracts subdomain from Host header (e.g., acme.saasify.com -> "acme")
+/// Development: Falls back to X-Tenant-Subdomain header when running on localhost
+/// </summary>
 public class TenantResolutionMiddleware
 {
     private readonly RequestDelegate _next;
@@ -104,22 +109,26 @@ public class TenantResolutionMiddleware
 
     private static string? ExtractSubdomain(HttpContext context)
     {
-        // Header
-        if (context.Request.Headers.TryGetValue("X-Tenant-Subdomain", out var header) && !string.IsNullOrWhiteSpace(header))
-        {
-            return header.ToString().Trim();
-        }
-
-        // Query Parameter
-        if (context.Request.Query.TryGetValue("tenantSubdomain", out var query) && !string.IsNullOrWhiteSpace(query))
-        {
-            return query.ToString().Trim();
-        }
-
-        // Host-based subdomain (future-ready). For dev when host = localhost:port, skip.
+        // Primary: Subdomain from Host (e.g., acme.saasify.com -> "acme")
         var host = context.Request.Host.Host;
+        
+        // For localhost development, allow header as fallback
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+            host.StartsWith("127.0.0.1") ||
+            host.StartsWith("::1"))
+        {
+            // Development fallback: Allow header for testing
+            if (context.Request.Headers.TryGetValue("X-Tenant-Subdomain", out var devHeader) && 
+                !string.IsNullOrWhiteSpace(devHeader))
+            {
+                return devHeader.ToString().Trim();
+            }
+            return null;
+        }
+
+        // Production: Extract subdomain from host
         var parts = host.Split('.');
-        if (parts.Length >= 2 && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        if (parts.Length >= 3) // e.g., acme.saasify.com or acme.api.saasify.com
         {
             return parts[0].Trim();
         }
