@@ -32,8 +32,6 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
 
-    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -113,10 +111,6 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             _tenantContext.TenantId == null ||
             s.TenantId == _tenantContext.TenantId);
 
-        modelBuilder.Entity<RefreshToken>().HasQueryFilter(rt => 
-            _tenantContext == null || 
-            _tenantContext.TenantId == null || 
-            rt.User.TenantId == _tenantContext.TenantId);
         // NOTE: Tenant and SubscriptionPlan are NOT filtered (accessible to all)
     }
 

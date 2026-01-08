@@ -9,7 +9,6 @@ public interface IApplicationDbContext
     DbSet<User> Users { get; }
     DbSet<Subscription> Subscriptions { get; }
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }
-    DbSet<RefreshToken> RefreshTokens { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

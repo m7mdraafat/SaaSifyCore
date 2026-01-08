@@ -24,17 +24,18 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("Email")
             .HasMaxLength(256)
             .IsRequired();
+            
+        builder.Property(u => u.ExternalId) // sub claim from Keycloak
+            .HasMaxLength(256)
+            .IsRequired(false);
 
-        // Now we can create indexes normally
-        builder.HasIndex(u => new { u.Email, u.TenantId })
-            .IsUnique()
-            .HasDatabaseName("IX_Users_Email_TenantId")
-            .IncludeProperties(u => new { u.PasswordHash, u.FirstName, u.LastName, u.Role }); // Covering index.
-
-        builder.Property(u => u.PasswordHash)
-            .HasMaxLength(500)
-            .IsRequired();
+        // ensure one local user per Keycloak user
+        builder.HasIndex(u => u.ExternalId) // => Partial index for nullable column
+            .HasDatabaseName("IX_Users_ExternalId")
+            .HasFilter("\"ExternalId\" IS NOT NULL");
         
+
+
         builder.Property(u => u.FirstName)
             .HasMaxLength(100)
             .IsRequired();
@@ -46,9 +47,6 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Role)
             .HasConversion<string>()
             .HasMaxLength(20)
-            .IsRequired();
-        
-        builder.Property(u => u.IsEmailVerified)
             .IsRequired();
         
         builder.Property(u => u.CreatedAt)
@@ -65,12 +63,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         
         // Now composite index works
         builder.HasIndex(u => new { u.Email, u.TenantId })
-            .HasDatabaseName("IX_Users_Email_TenantId");
-        
-        builder.HasMany(u => u.RefreshTokens)
-            .WithOne(rt => rt.User)
-            .HasForeignKey(rt => rt.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .IsUnique()
+            .HasDatabaseName("IX_Users_Email_TenantId")
+            .IncludeProperties(u => new { u.FirstName, u.LastName, u.Role });
         
         builder.Ignore(u => u.DomainEvents);
     }
